@@ -1,0 +1,1633 @@
+openapi: 3.0.3
+info:
+  title: SmartStock API
+  version: 1.0.0
+  description: |
+    REST API cho Hệ thống quản lý kho **SmartStock** của FreshMart.
+
+    **Nguyên tắc chung**
+    - Mọi endpoint (trừ `POST /api/auth/login`) yêu cầu JWT trong header `Authorization: Bearer <token>`.
+    - Mọi phản hồi dùng định dạng thống nhất `{ "status": 200, "message": "success", "data": {...} }`.
+    - Request / response dùng DTO riêng, không trả trực tiếp entity. `PasswordHash` không bao giờ được trả về.
+    - Tồn kho chỉ thay đổi khi chứng từ được **xác nhận**; không có API sửa tồn kho trực tiếp.
+    - `UserId` luôn lấy từ token, không nhận từ máy khách.
+    - Vai trò: `ADMIN` (toàn quyền), `STAFF` (xem dữ liệu, tạo chứng từ; chỉ sửa/xác nhận/hủy chứng từ do mình tạo).
+    - Access Token hết hạn sau 60 phút; claims: `sub` (UserId), `email`, `role`.
+  contact:
+    name: SmartStock Team
+servers:
+  - url: https://localhost:5001
+    description: Local development
+tags:
+  - name: Auth
+    description: Đăng nhập và thông tin người dùng hiện tại
+  - name: Users
+    description: Quản lý tài khoản (ADMIN)
+  - name: Categories
+    description: Danh mục sản phẩm
+  - name: Products
+    description: Sản phẩm
+  - name: Suppliers
+    description: Nhà cung cấp
+  - name: Receipts
+    description: Phiếu nhập kho
+  - name: Issues
+    description: Phiếu xuất kho
+  - name: Inventory
+    description: Tồn kho, cảnh báo, lịch sử và báo cáo
+  - name: LLM
+    description: Tính năng AI (chỉ đề xuất)
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────── AUTH ─────────────────────────
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Đăng nhập (cấp JWT)
+      description: |
+        Sai email, sai mật khẩu hoặc tài khoản bị khóa đều trả **401 với cùng một thông báo**.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: admin@freshmart.local
+              password: Admin@123
+      responses:
+        '200':
+          description: Đăng nhập thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LoginData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Lấy thông tin người dùng đang đăng nhập
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ───────────────────────── USERS ─────────────────────────
+  /api/users:
+    get:
+      tags: [Users]
+      summary: Lấy tất cả tài khoản (ADMIN)
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Users]
+      summary: Tạo tài khoản (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Tạo thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/users/{id}/status:
+    patch:
+      tags: [Users]
+      summary: Khóa / mở khóa tài khoản (ADMIN)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ───────────────────────── CATEGORIES ─────────────────────────
+  /api/categories:
+    get:
+      tags: [Categories]
+      summary: Lấy tất cả danh mục
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Categories]
+      summary: Tạo danh mục (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        '201':
+          description: Tạo thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ───────────────────────── PRODUCTS ─────────────────────────
+  /api/products:
+    get:
+      tags: [Products]
+      summary: Lấy danh sách sản phẩm
+      description: Hỗ trợ phân trang, sắp xếp, tìm kiếm từ khóa (tên / SKU) và lọc theo danh mục. Mặc định chỉ trả sản phẩm đang hoạt động.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: sortBy
+          in: query
+          description: Trường sắp xếp
+          schema:
+            type: string
+            enum: [name, sku, price, quantityInStock]
+            default: name
+        - name: sortDir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: keyword
+          in: query
+          description: Từ khóa tìm theo tên hoặc SKU
+          schema:
+            type: string
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PagedProducts'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Products]
+      summary: Tạo sản phẩm (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductRequest'
+      responses:
+        '201':
+          description: Tạo thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/products/{id}:
+    get:
+      tags: [Products]
+      summary: Lấy 1 sản phẩm kèm tồn kho hiện tại
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Products]
+      summary: Cập nhật sản phẩm (ADMIN)
+      description: Không cho phép sửa `quantityInStock` qua API này.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Products]
+      summary: Ẩn sản phẩm – soft delete (ADMIN)
+      description: Đặt `isActive = false`. Sản phẩm đã ẩn không được thêm vào chứng từ mới.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Đã ẩn sản phẩm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/products/{id}/history:
+    get:
+      tags: [Inventory]
+      summary: Lịch sử nhập / xuất của 1 sản phẩm
+      description: Chỉ gồm các chứng từ đã `CONFIRMED`, sắp xếp mới nhất trước.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PagedStockHistory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ───────────────────────── SUPPLIERS ─────────────────────────
+  /api/suppliers:
+    get:
+      tags: [Suppliers]
+      summary: Lấy tất cả nhà cung cấp
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Supplier'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Suppliers]
+      summary: Tạo nhà cung cấp (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierRequest'
+      responses:
+        '201':
+          description: Tạo thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Supplier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/suppliers/{id}:
+    put:
+      tags: [Suppliers]
+      summary: Cập nhật nhà cung cấp (ADMIN)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupplierRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Supplier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ───────────────────────── RECEIPTS ─────────────────────────
+  /api/receipts:
+    get:
+      tags: [Receipts]
+      summary: Lấy tất cả phiếu nhập
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DocumentStatus'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PagedReceipts'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Receipts]
+      summary: Tạo phiếu nhập nháp nhiều dòng
+      description: |
+        Tạo phiếu ở trạng thái `DRAFT` với mã tự sinh `PN-yyyyMMdd-xxx` (bộ đếm đặt lại mỗi ngày).
+        Phiếu phải có ≥ 1 dòng, `quantity > 0`, không lặp sản phẩm, không dùng sản phẩm đã ẩn.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptRequest'
+      responses:
+        '201':
+          description: Tạo phiếu nháp thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Receipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/receipts/parse:
+    post:
+      tags: [LLM]
+      summary: Phân tích hóa đơn dạng văn bản → đề xuất phiếu nhập
+      description: |
+        Gọi LLM (hoặc mock `ILlmService` nếu chưa có API key) để trích xuất các dòng hàng từ văn bản hóa đơn.
+
+        - Kết quả **chỉ là đề xuất**, hệ thống **không tự lưu** chứng từ.
+        - Backend kiểm tra JSON trả về: `productId` phải tồn tại, `quantity > 0`. JSON không hợp lệ → **400**.
+        - Sản phẩm không khớp danh mục được đưa vào `unmatched`, không tự tạo sản phẩm mới.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseReceiptRequest'
+            example:
+              text: "Nhà cung cấp Rau Sạch Đà Lạt. Cà chua 20 kg x 25000. Trứng gà 10 vỉ x 32000."
+      responses:
+        '200':
+          description: Đề xuất phiếu nhập
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ParseReceiptData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/receipts/{id}:
+    get:
+      tags: [Receipts]
+      summary: Lấy 1 phiếu nhập
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Receipt'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Receipts]
+      summary: Cập nhật phiếu nhập nháp
+      description: Chỉ sửa được phiếu `DRAFT` do chính mình tạo (ADMIN sửa được mọi phiếu nháp). Phiếu `CONFIRMED`/`CANCELLED` → 409.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Receipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/receipts/{id}/confirm:
+    patch:
+      tags: [Receipts]
+      summary: Xác nhận phiếu nhập → tăng tồn kho
+      description: |
+        Chuyển `DRAFT → CONFIRMED` và cộng `quantity` từng dòng vào `quantityInStock` trong **một transaction**.
+        Lỗi giữa chừng sẽ hoàn tác toàn bộ. STAFF chỉ xác nhận được phiếu do mình tạo.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Xác nhận thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Receipt'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/receipts/{id}/cancel:
+    patch:
+      tags: [Receipts]
+      summary: Hủy phiếu nhập nháp
+      description: Chuyển `DRAFT → CANCELLED`. Không ảnh hưởng tồn kho.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Hủy thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Receipt'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  # ───────────────────────── ISSUES ─────────────────────────
+  /api/issues:
+    get:
+      tags: [Issues]
+      summary: Lấy tất cả phiếu xuất
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DocumentStatus'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PagedIssues'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Issues]
+      summary: Tạo phiếu xuất nháp nhiều dòng
+      description: Tạo phiếu `DRAFT` với mã tự sinh `PX-yyyyMMdd-xxx`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueRequest'
+      responses:
+        '201':
+          description: Tạo phiếu nháp thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Issue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/issues/{id}:
+    get:
+      tags: [Issues]
+      summary: Lấy 1 phiếu xuất
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Issue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Issues]
+      summary: Cập nhật phiếu xuất nháp
+      description: Chỉ sửa được phiếu `DRAFT` do chính mình tạo. Phiếu đã `CONFIRMED`/`CANCELLED` → 409.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Issue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/issues/{id}/confirm:
+    patch:
+      tags: [Issues]
+      summary: Xác nhận phiếu xuất → giảm tồn kho
+      description: |
+        Kiểm tra **tất cả** các dòng trước khi trừ. Nếu bất kỳ dòng nào vượt tồn kho → **409** kèm danh sách
+        sản phẩm thiếu (`data.shortages`) và **không trừ dòng nào**. Thực hiện trong một transaction.
+
+        Phiếu có `reason = DAMAGED` chỉ **ADMIN** được xác nhận (STAFF → 403).
+        Kết quả trả về kèm danh sách sản phẩm vừa giảm xuống ≤ mức tồn tối thiểu.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Xác nhận thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ConfirmIssueData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Phiếu không ở trạng thái DRAFT, hoặc một/nhiều dòng vượt tồn kho
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        nullable: true
+                        properties:
+                          shortages:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/StockShortage'
+              examples:
+                insufficientStock:
+                  summary: Vượt tồn kho
+                  value:
+                    status: 409
+                    message: Insufficient stock
+                    data:
+                      shortages:
+                        - productId: 7
+                          productName: Sữa tươi 1L
+                          requested: 50
+                          available: 32
+                invalidState:
+                  summary: Sai trạng thái
+                  value:
+                    status: 409
+                    message: Only DRAFT documents can be confirmed
+                    data: null
+
+  /api/issues/{id}/cancel:
+    patch:
+      tags: [Issues]
+      summary: Hủy phiếu xuất nháp
+      description: Chuyển `DRAFT → CANCELLED`. Không ảnh hưởng tồn kho.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Hủy thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Issue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  # ───────────────────────── INVENTORY ─────────────────────────
+  /api/inventory/low-stock:
+    get:
+      tags: [Inventory]
+      summary: Sản phẩm có tồn kho ≤ tồn tối thiểu
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LowStockItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/reports/stock-summary:
+    get:
+      tags: [Inventory]
+      summary: Báo cáo biến động tồn kho theo khoảng ngày (ADMIN)
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StockSummaryReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# ═════════════════════════ COMPONENTS ═════════════════════════
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Nhập JWT nhận từ `/api/auth/login`. Swagger UI: bấm **Authorize**.'
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    FromDate:
+      name: fromDate
+      in: query
+      description: Lọc từ ngày (theo CreatedAt)
+      schema:
+        type: string
+        format: date
+    ToDate:
+      name: toDate
+      in: query
+      description: Lọc đến ngày (theo CreatedAt)
+      schema:
+        type: string
+        format: date
+
+  responses:
+    BadRequest:
+      description: Dữ liệu đầu vào không hợp lệ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 400
+            message: Validation failed
+            data:
+              errors:
+                - field: quantity
+                  message: Quantity must be greater than 0
+    Unauthorized:
+      description: Thiếu / sai / hết hạn token, hoặc đăng nhập thất bại
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 401
+            message: Unauthorized
+            data: null
+    Forbidden:
+      description: Token hợp lệ nhưng không đủ quyền
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 403
+            message: Forbidden
+            data: null
+    NotFound:
+      description: Không tìm thấy tài nguyên
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 404
+            message: Resource not found
+            data: null
+    Conflict:
+      description: Xung đột (SKU/email trùng, sai trạng thái chứng từ…)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 409
+            message: Document is not in DRAFT status
+            data: null
+
+  schemas:
+    # ── Envelope ──
+    ApiResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          description: Dữ liệu phản hồi (tùy endpoint)
+          nullable: true
+    ErrorResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true
+          type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+    # ── Enums ──
+    Role:
+      type: string
+      enum: [ADMIN, STAFF]
+    DocumentStatus:
+      type: string
+      enum: [DRAFT, CONFIRMED, CANCELLED]
+    IssueReason:
+      type: string
+      enum: [SALE, DAMAGED, INTERNAL]
+
+    # ── Auth / User ──
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    LoginData:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Thời gian sống của token (giây)
+          example: 3600
+        user:
+          $ref: '#/components/schemas/User'
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    CreateUserRequest:
+      type: object
+      required: [fullName, email, password, role]
+      properties:
+        fullName:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        role:
+          $ref: '#/components/schemas/Role'
+    UpdateUserStatusRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive:
+          type: boolean
+          description: false = khóa tài khoản, true = mở khóa
+
+    # ── Category / Supplier ──
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+    CategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+    Supplier:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+    SupplierRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        phone:
+          type: string
+          maxLength: 30
+        address:
+          type: string
+          maxLength: 255
+
+    # ── Product ──
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        sku:
+          type: string
+        name:
+          type: string
+        categoryId:
+          type: integer
+          format: int64
+        categoryName:
+          type: string
+        unit:
+          type: string
+          example: kg
+        price:
+          type: number
+          format: decimal
+          minimum: 0
+        quantityInStock:
+          type: integer
+          description: Chỉ thay đổi khi chứng từ được xác nhận
+        minStock:
+          type: integer
+          minimum: 0
+        isActive:
+          type: boolean
+    ProductRequest:
+      type: object
+      required: [sku, name, categoryId, unit, price, minStock]
+      properties:
+        sku:
+          type: string
+          maxLength: 50
+          description: Phải duy nhất (trùng → 409)
+        name:
+          type: string
+          maxLength: 200
+        categoryId:
+          type: integer
+          format: int64
+        unit:
+          type: string
+          maxLength: 20
+        price:
+          type: number
+          format: decimal
+          minimum: 0
+        minStock:
+          type: integer
+          minimum: 0
+    PagedProducts:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Product'
+    PageMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        totalItems:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+
+    # ── Receipt ──
+    ReceiptItemRequest:
+      type: object
+      required: [productId, quantity, unitPrice]
+      properties:
+        productId:
+          type: integer
+          format: int64
+        quantity:
+          type: integer
+          minimum: 1
+        unitPrice:
+          type: number
+          format: decimal
+          minimum: 0
+    ReceiptRequest:
+      type: object
+      required: [supplierId, items]
+      properties:
+        supplierId:
+          type: integer
+          format: int64
+        note:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          description: Không được lặp `productId`
+          items:
+            $ref: '#/components/schemas/ReceiptItemRequest'
+    ReceiptItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        productId:
+          type: integer
+          format: int64
+        productName:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+          format: decimal
+    Receipt:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        code:
+          type: string
+          example: PN-20261121-001
+        supplierId:
+          type: integer
+          format: int64
+        supplierName:
+          type: string
+        status:
+          $ref: '#/components/schemas/DocumentStatus'
+        note:
+          type: string
+        createdBy:
+          type: integer
+          format: int64
+        createdByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        totalAmount:
+          type: number
+          format: decimal
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptItem'
+    PagedReceipts:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Receipt'
+
+    # ── Issue ──
+    IssueItemRequest:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: integer
+          format: int64
+        quantity:
+          type: integer
+          minimum: 1
+    IssueRequest:
+      type: object
+      required: [reason, items]
+      properties:
+        reason:
+          $ref: '#/components/schemas/IssueReason'
+        note:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          description: Không được lặp `productId`
+          items:
+            $ref: '#/components/schemas/IssueItemRequest'
+    IssueItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        productId:
+          type: integer
+          format: int64
+        productName:
+          type: string
+        quantity:
+          type: integer
+    Issue:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        code:
+          type: string
+          example: PX-20261121-001
+        reason:
+          $ref: '#/components/schemas/IssueReason'
+        status:
+          $ref: '#/components/schemas/DocumentStatus'
+        note:
+          type: string
+        createdBy:
+          type: integer
+          format: int64
+        createdByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueItem'
+    PagedIssues:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Issue'
+    StockShortage:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        productName:
+          type: string
+        requested:
+          type: integer
+        available:
+          type: integer
+    ConfirmIssueData:
+      type: object
+      properties:
+        issue:
+          $ref: '#/components/schemas/Issue'
+        lowStockProducts:
+          type: array
+          description: Sản phẩm vừa giảm xuống ≤ mức tồn tối thiểu sau khi xác nhận
+          items:
+            $ref: '#/components/schemas/LowStockItem'
+
+    # ── Inventory ──
+    LowStockItem:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        sku:
+          type: string
+        name:
+          type: string
+        quantityInStock:
+          type: integer
+        minStock:
+          type: integer
+    StockHistoryItem:
+      type: object
+      properties:
+        documentType:
+          type: string
+          enum: [RECEIPT, ISSUE]
+        documentId:
+          type: integer
+          format: int64
+        documentCode:
+          type: string
+        direction:
+          type: string
+          enum: [IN, OUT]
+        quantity:
+          type: integer
+        confirmedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: integer
+          format: int64
+        createdByName:
+          type: string
+    PagedStockHistory:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/StockHistoryItem'
+    StockSummaryItem:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        sku:
+          type: string
+        name:
+          type: string
+        openingQty:
+          type: integer
+          description: Tồn đầu kỳ
+        totalIn:
+          type: integer
+          description: Tổng nhập trong kỳ
+        totalOut:
+          type: integer
+          description: Tổng xuất trong kỳ
+        closingQty:
+          type: integer
+          description: Tồn cuối kỳ
+    StockSummaryReport:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StockSummaryItem'
+
+    # ── LLM ──
+    ParseReceiptRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: Nội dung hóa đơn dạng văn bản (không chứa dữ liệu cá nhân thật)
+          maxLength: 5000
+    ParsedReceiptItem:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        productName:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPrice:
+          type: number
+          format: decimal
+          nullable: true
+        rawText:
+          type: string
+          description: Đoạn văn bản gốc dẫn tới dòng này
+    ParseReceiptData:
+      type: object
+      properties:
+        supplierId:
+          type: integer
+          format: int64
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedReceiptItem'
+        unmatched:
+          type: array
+          description: Dòng không khớp sản phẩm nào trong danh mục
+          items:
+            type: string
+        isSuggestionOnly:
+          type: boolean
+          example: true
