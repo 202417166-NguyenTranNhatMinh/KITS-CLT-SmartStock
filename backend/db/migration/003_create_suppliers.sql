@@ -1,0 +1,6 @@
+CREATE TABLE suppliers (
+    id      INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name    VARCHAR(200) NOT NULL,
+    phone   VARCHAR(30),
+    address VARCHAR(500)
+);

@@ -1,0 +1,6 @@
+CREATE TABLE categories (
+    id   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+
+    CONSTRAINT uq_categories_name UNIQUE (name)
+);
