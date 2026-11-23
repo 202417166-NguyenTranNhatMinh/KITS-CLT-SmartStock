@@ -1379,10 +1379,19 @@ components:
         createdAt:
           type: string
           format: date-time
-        confirmedAt:
+        finalizedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Người xác nhận hoặc hủy phiếu, có thể khác người tạo (null khi còn DRAFT)
+        finalizedByName:
+          type: string
+          nullable: true
+        finalizedAt:
           type: string
           format: date-time
           nullable: true
+          description: Thời điểm xác nhận hoặc hủy (null khi còn DRAFT)
         totalAmount:
           type: number
           format: decimal
@@ -1461,10 +1470,19 @@ components:
         createdAt:
           type: string
           format: date-time
-        confirmedAt:
+        finalizedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Người xác nhận hoặc hủy phiếu, có thể khác người tạo (null khi còn DRAFT)
+        finalizedByName:
+          type: string
+          nullable: true
+        finalizedAt:
           type: string
           format: date-time
           nullable: true
+          description: Thời điểm xác nhận hoặc hủy (null khi còn DRAFT)
         items:
           type: array
           items:
