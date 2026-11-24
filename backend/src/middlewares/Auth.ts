@@ -3,7 +3,7 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import { AppError } from "../common/errors";
 import { env } from "../config/env";
-import type { AuthenticatedUser } from "../contracts/common/enums.contract";
+import type { AuthenticatedUser, Role } from "../contracts/common/enums.contract";
 import { roleSchema } from "../contracts/common/enums.contract";
 
 function parseActor(payload: string | JwtPayload): AuthenticatedUser {
@@ -27,4 +27,12 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
   } catch (error) {
     next(error instanceof AppError ? error : AppError.unauthorized("Missing or invalid token"));
   }
+}
+
+export function authorize(...roles: Role[]) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) return next(AppError.unauthorized("Missing or invalid token"));
+    if (!roles.includes(req.user.role)) return next(AppError.forbidden("Bạn không có quyền thực hiện thao tác này"));
+    next();
+  };
 }
