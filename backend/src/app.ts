@@ -6,6 +6,8 @@ import YAML from 'yamljs';
 import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler';
 import { sendSuccess } from './common/response';
+import receiptRoutes from './routes/receiptRoutes';
+import issueRoutes from './routes/issueRoutes';
 
 const app = express();
 
@@ -28,7 +30,8 @@ app.get('/api/health', (_req, res) => {
   sendSuccess(res, { ok: true }, 'SmartStock API is running');
 });
 
-// Các routes nghiệp vụ sẽ đăng ký ở đây (auth, users, categories, ...)
+app.use('/api/receipts', receiptRoutes);
+app.use('/api/issues', issueRoutes);
 
 // 404 và Global Error Handler (luôn đặt cuối cùng)
 app.use(notFoundHandler);
