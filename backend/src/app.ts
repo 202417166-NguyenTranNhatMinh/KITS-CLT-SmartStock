@@ -8,9 +8,8 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler';
 import { sendSuccess } from './common/response';
 import receiptRoutes from './routes/receiptRoutes';
 import issueRoutes from './routes/issueRoutes';
-import categoryRoutes from './routes/categoryRoutes';     
-
-
+import categoryRoutes from './routes/categoryRoutes';
+import authRoutes from './routes/authRoutes';
 
 const app = express();
 
@@ -33,9 +32,11 @@ app.get('/api/health', (_req, res) => {
   sendSuccess(res, { ok: true }, 'SmartStock API is running');
 });
 
+// Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/issues', issueRoutes);
-app.use('/api/categories', categoryRoutes);               
+app.use('/api/categories', categoryRoutes);
 
 // 404 và Global Error Handler (luôn đặt cuối cùng)
 app.use(notFoundHandler);
