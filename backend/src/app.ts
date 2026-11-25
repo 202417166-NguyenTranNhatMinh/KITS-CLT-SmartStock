@@ -10,7 +10,7 @@ import receiptRoutes from './routes/receiptRoutes';
 import issueRoutes from './routes/issueRoutes';
 import categoryRoutes from './routes/categoryRoutes';
 import authRoutes from './routes/authRoutes';
-
+import userRoutes from './routes/userRoutes';
 const app = express();
 
 app.use(
@@ -37,7 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/categories', categoryRoutes);
-
+app.use('/api/users', userRoutes);
 // 404 và Global Error Handler (luôn đặt cuối cùng)
 app.use(notFoundHandler);
 app.use(errorHandler);

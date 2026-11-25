@@ -54,4 +54,38 @@ export const userRepo = {
     );
     return result.rows[0] ?? null;
   },
+  async findAll(): Promise<UserEntity[]> {
+    const result = await pool.query<UserEntity>(
+      `SELECT id, full_name, email, password_hash, role, is_active, created_at
+       FROM users
+       ORDER BY id ASC`
+    );
+    return result.rows;
+  },
+
+  async create(params: {
+    fullName: string;
+    email: string;
+    passwordHash: string;
+    role: UserRole;
+  }): Promise<UserEntity> {
+    const result = await pool.query<UserEntity>(
+      `INSERT INTO users (full_name, email, password_hash, role, is_active)
+       VALUES ($1, $2, $3, $4, TRUE)
+       RETURNING id, full_name, email, password_hash, role, is_active, created_at`,
+      [params.fullName, params.email, params.passwordHash, params.role]
+    );
+    return result.rows[0];
+  },
+
+  async updateStatus(id: number, isActive: boolean): Promise<UserEntity | null> {
+    const result = await pool.query<UserEntity>(
+      `UPDATE users
+       SET is_active = $2
+       WHERE id = $1
+       RETURNING id, full_name, email, password_hash, role, is_active, created_at`,
+      [id, isActive]
+    );
+    return result.rows[0] ?? null;
+  },
 };
