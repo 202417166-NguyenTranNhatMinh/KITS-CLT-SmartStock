@@ -17,3 +17,10 @@ export interface Product {
   minStock: number;
   isActive: boolean;
 }
+
+export interface Supplier {
+  id: number;
+  name: string;
+  phone: string | null;
+  address: string | null;
+}

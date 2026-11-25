@@ -8,9 +8,9 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler';
 import { sendSuccess } from './common/response';
 import receiptRoutes from './routes/receiptRoutes';
 import issueRoutes from './routes/issueRoutes';
-import categoryRoutes from './routes/categoryRoutes';     
-
-
+import categoryRoutes from './routes/categoryRoutes';
+import supplierRoutes from './routes/supplierRoutes';
+import productRoutes from './routes/productRoutes';
 
 const app = express();
 
@@ -35,7 +35,9 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/issues', issueRoutes);
-app.use('/api/categories', categoryRoutes);               
+app.use('/api/categories', categoryRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/products', productRoutes);
 
 // 404 và Global Error Handler (luôn đặt cuối cùng)
 app.use(notFoundHandler);
