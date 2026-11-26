@@ -103,6 +103,25 @@ FRONTEND_URL=http://localhost:5173
 npm run dev
 ```
 
+## Chạy toàn bộ dự án bằng Docker Compose
+
+Yêu cầu: Docker & Docker Compose đang chạy. Từ thư mục gốc `KITS-CLT-SmartStock`:
+
+```bash
+docker compose up -d --build
+```
+
+Backend sẽ tự động chạy toàn bộ SQL migration trong `backend/db/migration/` khi khởi động. Để nạp dữ liệu mẫu (tài khoản demo, 30 sản phẩm, chứng từ mẫu), chạy thêm:
+
+```bash
+docker compose exec backend npm run seed
+```
+
+- **Swagger UI:** `http://localhost:4000/api-docs`
+- **Backend Health:** `http://localhost:4000/api/health`
+- **Frontend:** `http://localhost:5173`
+- **Dừng các container:** `docker compose down` (thêm `-v` nếu muốn xóa luôn dữ liệu Postgres trong volume)
+
 
 ## Lưu ý cho skeleton hiện tại
 - Các file TypeScript và migration hiện mới là khung trống; cần bổ sung implementation trước khi API hoạt động hoàn chỉnh.
