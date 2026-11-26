@@ -26,7 +26,7 @@ function createReceipt(status: Receipt["status"], createdBy = 10): Receipt {
   };
 }
 
-function createService(receipt: Receipt): ReceiptService {
+function createService(receipt: Receipt, onIncrease: (productId: number) => void = () => {}): ReceiptService {
   const repository: ReceiptRepository = {
     async findSupplierById() { return { id: 1, name: "Supplier" }; },
     async findProductsByIds() { return []; },
@@ -37,7 +37,7 @@ function createService(receipt: Receipt): ReceiptService {
     async transaction(work) {
       return work({
         async findByIdForUpdate() { return receipt; },
-        async increaseStock() {},
+        async increaseStock(productId) { onIncrease(productId); },
         async finalize() { return receipt; },
       });
     },
@@ -62,4 +62,18 @@ test("rejects a STAFF member managing another member's receipt", async () => {
     () => service.cancel(1, staff),
     (error: unknown) => error instanceof AppError && error.status === 403,
   );
+});
+
+test("confirms receipts by updating products in ascending ID order", async () => {
+  const receipt = createReceipt("DRAFT");
+  receipt.items = [
+    { id: 1, productId: 9, productName: "Water", quantity: 1, unitPrice: 50 },
+    { id: 2, productId: 3, productName: "Milk", quantity: 1, unitPrice: 50 },
+  ];
+  const updatedIds: number[] = [];
+
+  await createService(receipt, (id) => updatedIds.push(id)).confirm(1, staff);
+
+  assert.deepEqual(updatedIds, [3, 9]);
+  assert.deepEqual(receipt.items.map((item) => item.productId), [9, 3]);
 });
