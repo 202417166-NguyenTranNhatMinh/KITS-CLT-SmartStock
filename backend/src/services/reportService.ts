@@ -6,6 +6,29 @@ import { inventoryRepository, type InventoryRepository } from "../repo/inventory
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VN_OFFSET = "+07:00";
+const UTF8_BOM = "\uFEFF";
+
+function escapeCsvCell(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(safe)) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
+}
+
+export function formatStockSummaryCsv(report: StockSummaryReport): string {
+  const header = ["Mã SP", "SKU", "Tên sản phẩm", "Tồn đầu kỳ", "Tổng nhập", "Tổng xuất", "Tồn cuối kỳ"];
+  const rows = report.items.map((item) => [
+    String(item.productId),
+    escapeCsvCell(item.sku),
+    escapeCsvCell(item.name),
+    String(item.openingQty),
+    String(item.totalIn),
+    String(item.totalOut),
+    String(item.closingQty),
+  ]);
+  return UTF8_BOM + [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+}
 
 /** Quy đổi khoảng ngày YYYY-MM-DD theo múi giờ Asia/Ho_Chi_Minh sang nửa khoảng [fromStart, toExclusive). */
 export function toVietnamDateRange(from: string, to: string): { fromStart: Date; toExclusive: Date } {
@@ -32,6 +55,11 @@ export class ReportService {
       to: query.to,
       items,
     };
+  }
+
+  async exportStockSummaryCsv(query: StockSummaryQuery): Promise<string> {
+    const report = await this.getStockSummary(query);
+    return formatStockSummaryCsv(report);
   }
 }
 
