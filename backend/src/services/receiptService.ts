@@ -40,7 +40,9 @@ export class ReceiptService {
       if (!receipt) throw notFound("Receipt", id);
       this.assertDraftAndOwner(receipt, actor, "confirmed");
 
-      for (const item of receipt.items) {
+      // Acquire product row locks in the same order for concurrent receipts.
+      const sortedItems = [...receipt.items].sort((a, b) => a.productId - b.productId);
+      for (const item of sortedItems) {
         await tx.increaseStock(item.productId, item.quantity);
       }
 
