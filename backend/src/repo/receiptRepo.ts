@@ -28,16 +28,18 @@ export interface ReceiptRepository {
 
 type ReceiptRow = {
   id: number; code: string; supplier_id: number; supplier_name: string; status: Receipt["status"]; note: string | null;
-  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_at: Date | null;
+  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_by_name: string | null; finalized_at: Date | null;
 };
 type ReceiptDetailRow = { id: number; product_id: number; product_name: string; quantity: number; unit_price: string };
 
 const RECEIPT_SELECT = `
   SELECT sr.id, sr.code, sr.supplier_id, s.name AS supplier_name, sr.status, sr.note,
-         sr.created_by, creator.full_name AS created_by_name, sr.created_at, sr.finalized_by, sr.finalized_at
+         sr.created_by, creator.full_name AS created_by_name, sr.created_at,
+         sr.finalized_by, finalizer.full_name AS finalized_by_name, sr.finalized_at
   FROM stock_receipts sr
   JOIN suppliers s ON s.id = sr.supplier_id
   JOIN users creator ON creator.id = sr.created_by
+  LEFT JOIN users finalizer ON finalizer.id = sr.finalized_by
 `;
 const toIso = (value: Date | string): string => new Date(value).toISOString();
 
@@ -56,7 +58,8 @@ async function toReceipt(row: ReceiptRow, db: Queryable): Promise<Receipt> {
   return {
     id: row.id, code: row.code, supplierId: row.supplier_id, supplierName: row.supplier_name, status: row.status,
     ...(row.note ? { note: row.note } : {}), createdBy: row.created_by, createdByName: row.created_by_name,
-    createdAt: toIso(row.created_at), finalizedBy: row.finalized_by, finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
+    createdAt: toIso(row.created_at), finalizedBy: row.finalized_by, finalizedByName: row.finalized_by_name,
+    finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
     totalAmount: items.reduce((total, item) => total + item.quantity * item.unitPrice, 0), items,
   };
 }

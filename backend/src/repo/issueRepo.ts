@@ -7,7 +7,7 @@ import type { ConfirmIssueData, Issue, IssueItem, IssueRequest, LowStockProduct 
 import type { Queryable } from "../types/db";
 import * as productRepo from "./productRepo";
 
-export type StockProduct = { id: number; name: string; isActive: boolean; quantityInStock: number };
+export type StockProduct = { id: number; name: string; isActive: boolean; quantityInStock: number; minStock: number };
 export type IssueCreateInput = IssueRequest & { code: string; createdBy: number; createdAt: Date };
 export interface IssueTransaction {
   findByIdForUpdate(id: number): Promise<Issue | null>;
@@ -27,13 +27,15 @@ export interface IssueRepository {
 
 type IssueRow = {
   id: number; code: string; reason: Issue["reason"]; status: Issue["status"]; note: string | null;
-  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_at: Date | null;
+  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_by_name: string | null; finalized_at: Date | null;
 };
 type IssueDetailRow = { id: number; product_id: number; product_name: string; quantity: number };
 const ISSUE_SELECT = `
   SELECT si.id, si.code, si.reason, si.status, si.note, si.created_by,
-         creator.full_name AS created_by_name, si.created_at, si.finalized_by, si.finalized_at
+         creator.full_name AS created_by_name, si.created_at,
+         si.finalized_by, finalizer.full_name AS finalized_by_name, si.finalized_at
   FROM stock_issues si JOIN users creator ON creator.id = si.created_by
+  LEFT JOIN users finalizer ON finalizer.id = si.finalized_by
 `;
 const toIso = (value: Date | string): string => new Date(value).toISOString();
 
@@ -49,7 +51,8 @@ async function toIssue(row: IssueRow, db: Queryable): Promise<Issue> {
   return {
     id: row.id, code: row.code, reason: row.reason, status: row.status, ...(row.note ? { note: row.note } : {}),
     createdBy: row.created_by, createdByName: row.created_by_name, createdAt: toIso(row.created_at),
-    finalizedBy: row.finalized_by, finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
+    finalizedBy: row.finalized_by, finalizedByName: row.finalized_by_name,
+    finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
     items: await loadDetails(row.id, db),
   };
 }
@@ -103,7 +106,7 @@ function createTransaction(client: PoolClient): IssueTransaction {
     findByIdForUpdate: (id) => findByIdInternal(id, client, true),
     async lockProductsByIds(ids) {
       const products = await productRepo.lockByIds(client, ids);
-      return products.map(({ id, name, isActive, quantityInStock }) => ({ id, name, isActive, quantityInStock }));
+      return products.map(({ id, name, isActive, quantityInStock, minStock }) => ({ id, name, isActive, quantityInStock, minStock }));
     },
     async decreaseStock(productId, quantity) {
       const result = await client.query(
