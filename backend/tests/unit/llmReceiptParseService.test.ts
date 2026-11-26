@@ -4,6 +4,7 @@ import test from "node:test";
 import { AppError } from "../../src/common/errors";
 import type { LlmProductOption, LlmSupplierOption } from "../../src/contracts/llm/receiptParse.contract";
 import { MockLlmService, OpenAiCompatibleLlmService } from "../../src/services/llm/llmService";
+import { buildReceiptParsePrompt } from "../../src/services/llm/receiptParsePrompt";
 import { createDefaultLlmService, ReceiptParseService } from "../../src/services/llm/receiptParseService";
 
 const PRODUCTS: LlmProductOption[] = [
@@ -80,6 +81,17 @@ test("ReceiptParseService with MockLlmService extracts items, k-prices, and unma
   assert.equal(merged.items.length, 1);
   assert.equal(merged.items[0].quantity, 15);
   assert.equal(merged.items[0].rawText, "Cà chua 10 kg; Cà chua thêm 5 kg");
+});
+
+test("buildReceiptParsePrompt structures XML tags and injects catalog options", () => {
+  const rendered = buildReceiptParsePrompt(PRODUCTS, SUPPLIERS);
+  for (const tag of ["<role>", "<security>", "<rules>", "<examples>", "<catalog>", "<critical_reminders>"]) {
+    assert.ok(rendered.includes(tag), `Missing XML section ${tag}`);
+  }
+  assert.ok(rendered.includes("RAU-001"));
+  assert.ok(rendered.includes("Nông trại Đà Lạt Xanh"));
+  assert.ok(!rendered.includes("{{PRODUCTS}}"));
+  assert.ok(!rendered.includes("{{SUPPLIERS}}"));
 });
 
 test("ReceiptParseService throws 400 when LLM returns malformed JSON", async () => {
