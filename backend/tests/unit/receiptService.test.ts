@@ -20,6 +20,7 @@ function createReceipt(status: Receipt["status"], createdBy = 10): Receipt {
     createdByName: "Staff",
     createdAt: "2026-11-22T10:00:00.000Z",
     finalizedBy: null,
+    finalizedByName: null,
     finalizedAt: null,
     totalAmount: 100,
     items: [{ id: 1, productId: 7, productName: "Milk", quantity: 2, unitPrice: 50 }],

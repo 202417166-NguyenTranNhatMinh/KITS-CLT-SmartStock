@@ -52,12 +52,17 @@ export class IssueService {
         throw AppError.conflict("Insufficient stock", { shortages });
       }
 
+      // Only products above the threshold before this issue can newly cross it.
+      const previouslyAboveThresholdIds = products
+        .filter((product) => product.quantityInStock > product.minStock)
+        .map((product) => product.id);
+
       for (const item of issue.items) {
         await tx.decreaseStock(item.productId, item.quantity);
       }
 
       const confirmedIssue = await tx.finalize(id, "CONFIRMED", actor.id, this.now());
-      const lowStockProducts = await tx.findLowStockByIds(productIds);
+      const lowStockProducts = await tx.findLowStockByIds(previouslyAboveThresholdIds);
       return { issue: confirmedIssue, lowStockProducts };
     });
   }
