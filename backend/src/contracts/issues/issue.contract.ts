@@ -47,6 +47,7 @@ export type Issue = {
   createdByName: string;
   createdAt: string;
   finalizedBy: number | null;
+  finalizedByName: string | null;
   finalizedAt: string | null;
   items: IssueItem[];
 };

@@ -500,8 +500,6 @@ paths:
       tags: [Receipts]
       summary: Lấy tất cả phiếu nhập
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/FromDate'
         - $ref: '#/components/parameters/ToDate'
         - name: status
@@ -519,7 +517,9 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/PagedReceipts'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Receipt'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -711,8 +711,6 @@ paths:
       tags: [Issues]
       summary: Lấy tất cả phiếu xuất
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/FromDate'
         - $ref: '#/components/parameters/ToDate'
         - name: status
@@ -730,7 +728,9 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/PagedIssues'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Issue'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -830,7 +830,7 @@ paths:
         sản phẩm thiếu (`data.shortages`) và **không trừ dòng nào**. Thực hiện trong một transaction.
 
         Phiếu có `reason = DAMAGED` chỉ **ADMIN** được xác nhận (STAFF → 403).
-        Kết quả trả về kèm danh sách sản phẩm vừa giảm xuống ≤ mức tồn tối thiểu.
+        Kết quả trả về kèm sản phẩm có tồn trước khi xuất > mức tối thiểu và sau khi xuất ≤ mức tối thiểu.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
@@ -1401,16 +1401,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReceiptItem'
-    PagedReceipts:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          properties:
-            items:
-              type: array
-              items:
-                $ref: '#/components/schemas/Receipt'
-
     # ── Issue ──
     IssueItemRequest:
       type: object
@@ -1489,15 +1479,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IssueItem'
-    PagedIssues:
-      allOf:
-        - $ref: '#/components/schemas/PageMeta'
-        - type: object
-          properties:
-            items:
-              type: array
-              items:
-                $ref: '#/components/schemas/Issue'
     StockShortage:
       type: object
       properties:
@@ -1517,7 +1498,7 @@ components:
           $ref: '#/components/schemas/Issue'
         lowStockProducts:
           type: array
-          description: Sản phẩm vừa giảm xuống ≤ mức tồn tối thiểu sau khi xác nhận
+          description: Sản phẩm có tồn trước khi xuất > mức tối thiểu và sau khi xuất ≤ mức tối thiểu
           items:
             $ref: '#/components/schemas/LowStockItem'
 

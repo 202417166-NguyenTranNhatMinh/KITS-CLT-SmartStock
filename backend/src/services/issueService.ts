@@ -1,7 +1,7 @@
 import type { AuthenticatedUser } from "../contracts/common/enums.contract";
 import type { DocumentFilters } from "../contracts/common/documentFilters.contract";
 import type { ConfirmIssueData, Issue, IssueRequest, StockShortage } from "../contracts/issues/issue.contract";
-import type { IssueRepository, StockProduct } from "../repo/issueRepo";
+import type { IssueRepository, IssueTransaction, StockProduct } from "../repo/issueRepo";
 import { AppError } from "../common/errors";
 import { DocumentNumberService } from "./documentNumberService";
 
@@ -28,10 +28,13 @@ export class IssueService {
   }
 
   async update(id: number, input: IssueRequest, actor: AuthenticatedUser): Promise<Issue> {
-    const issue = await this.requireIssue(id);
-    this.assertDraftAndOwner(issue, actor, "updated");
-    await this.ensureProductsAreActive(input);
-    return this.issueRepository.replaceDraft(id, input);
+    return this.issueRepository.transaction(async (tx) => {
+      const issue = await tx.findByIdForUpdate(id);
+      if (!issue) throw notFound("Issue", id);
+      this.assertDraftAndOwner(issue, actor, "updated");
+      await this.ensureProductsAreActive(input, tx);
+      return tx.replaceDraft(id, input);
+    });
   }
 
   async confirm(id: number, actor: AuthenticatedUser): Promise<ConfirmIssueData> {
@@ -52,12 +55,17 @@ export class IssueService {
         throw AppError.conflict("Insufficient stock", { shortages });
       }
 
+      // Only products above the threshold before this issue can newly cross it.
+      const previouslyAboveThresholdIds = products
+        .filter((product) => product.quantityInStock > product.minStock)
+        .map((product) => product.id);
+
       for (const item of issue.items) {
         await tx.decreaseStock(item.productId, item.quantity);
       }
 
       const confirmedIssue = await tx.finalize(id, "CONFIRMED", actor.id, this.now());
-      const lowStockProducts = await tx.findLowStockByIds(productIds);
+      const lowStockProducts = await tx.findLowStockByIds(previouslyAboveThresholdIds);
       return { issue: confirmedIssue, lowStockProducts };
     });
   }
@@ -77,8 +85,8 @@ export class IssueService {
     return issue;
   }
 
-  private async ensureProductsAreActive(input: IssueRequest): Promise<void> {
-    const products = await this.issueRepository.findProductsByIds(input.items.map((item) => item.productId));
+  private async ensureProductsAreActive(input: IssueRequest, reader: Pick<IssueRepository | IssueTransaction, "findProductsByIds"> = this.issueRepository): Promise<void> {
+    const products = await reader.findProductsByIds(input.items.map((item) => item.productId));
     const byId = new Map(products.map((product) => [product.id, product]));
     const unavailable = input.items.map((item) => item.productId).find((id) => !byId.get(id)?.isActive);
     if (unavailable !== undefined) throw notFound("Active product", unavailable);

@@ -12,6 +12,9 @@ export type ReceiptCreateInput = ReceiptRequest & { code: string; createdBy: num
 
 export interface ReceiptTransaction {
   findByIdForUpdate(id: number): Promise<Receipt | null>;
+  findSupplierById(id: number): Promise<{ id: number; name: string } | null>;
+  findProductsByIds(ids: number[]): Promise<ActiveProduct[]>;
+  replaceDraft(id: number, input: ReceiptRequest): Promise<Receipt>;
   increaseStock(productId: number, quantity: number): Promise<void>;
   finalize(id: number, status: "CONFIRMED" | "CANCELLED", finalizedBy: number, finalizedAt: Date): Promise<Receipt>;
 }
@@ -21,23 +24,24 @@ export interface ReceiptRepository {
   findProductsByIds(ids: number[]): Promise<ActiveProduct[]>;
   createDraft(input: ReceiptCreateInput): Promise<Receipt>;
   findById(id: number): Promise<Receipt | null>;
-  replaceDraft(id: number, input: ReceiptRequest): Promise<Receipt>;
   findAll(filters: DocumentFilters): Promise<Receipt[]>;
   transaction<T>(work: (tx: ReceiptTransaction) => Promise<T>): Promise<T>;
 }
 
 type ReceiptRow = {
   id: number; code: string; supplier_id: number; supplier_name: string; status: Receipt["status"]; note: string | null;
-  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_at: Date | null;
+  created_by: number; created_by_name: string; created_at: Date; finalized_by: number | null; finalized_by_name: string | null; finalized_at: Date | null;
 };
 type ReceiptDetailRow = { id: number; product_id: number; product_name: string; quantity: number; unit_price: string };
 
 const RECEIPT_SELECT = `
   SELECT sr.id, sr.code, sr.supplier_id, s.name AS supplier_name, sr.status, sr.note,
-         sr.created_by, creator.full_name AS created_by_name, sr.created_at, sr.finalized_by, sr.finalized_at
+         sr.created_by, creator.full_name AS created_by_name, sr.created_at,
+         sr.finalized_by, finalizer.full_name AS finalized_by_name, sr.finalized_at
   FROM stock_receipts sr
   JOIN suppliers s ON s.id = sr.supplier_id
   JOIN users creator ON creator.id = sr.created_by
+  LEFT JOIN users finalizer ON finalizer.id = sr.finalized_by
 `;
 const toIso = (value: Date | string): string => new Date(value).toISOString();
 
@@ -56,7 +60,8 @@ async function toReceipt(row: ReceiptRow, db: Queryable): Promise<Receipt> {
   return {
     id: row.id, code: row.code, supplierId: row.supplier_id, supplierName: row.supplier_name, status: row.status,
     ...(row.note ? { note: row.note } : {}), createdBy: row.created_by, createdByName: row.created_by_name,
-    createdAt: toIso(row.created_at), finalizedBy: row.finalized_by, finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
+    createdAt: toIso(row.created_at), finalizedBy: row.finalized_by, finalizedByName: row.finalized_by_name,
+    finalizedAt: row.finalized_at ? toIso(row.finalized_at) : null,
     totalAmount: items.reduce((total, item) => total + item.quantity * item.unitPrice, 0), items,
   };
 }
@@ -75,12 +80,12 @@ async function insertDetails(receiptId: number, items: ReceiptRequest["items"], 
   }
 }
 
-export async function findSupplierById(id: number): Promise<{ id: number; name: string } | null> {
-  const { rows } = await pool.query<{ id: number; name: string }>("SELECT id, name FROM suppliers WHERE id = $1", [id]);
+export async function findSupplierById(id: number, db: Queryable = pool): Promise<{ id: number; name: string } | null> {
+  const { rows } = await db.query<{ id: number; name: string }>("SELECT id, name FROM suppliers WHERE id = $1", [id]);
   return rows[0] ?? null;
 }
-export async function findProductsByIds(ids: number[]): Promise<ActiveProduct[]> {
-  const products = await productRepo.findByIds(ids);
+export async function findProductsByIds(ids: number[], db: Queryable = pool): Promise<ActiveProduct[]> {
+  const products = await productRepo.findByIds(ids, db);
   return products.map(({ id, name, isActive }) => ({ id, name, isActive }));
 }
 export async function createDraft(input: ReceiptCreateInput): Promise<Receipt> {
@@ -96,14 +101,12 @@ export async function createDraft(input: ReceiptCreateInput): Promise<Receipt> {
   });
 }
 export function findById(id: number): Promise<Receipt | null> { return findByIdInternal(id, pool); }
-export async function replaceDraft(id: number, input: ReceiptRequest): Promise<Receipt> {
-  return withTransaction(async (client) => {
+async function replaceDraft(id: number, input: ReceiptRequest, client: PoolClient): Promise<Receipt> {
     const result = await client.query(`UPDATE stock_receipts SET supplier_id = $2, note = $3 WHERE id = $1 AND status = 'DRAFT'`, [id, input.supplierId, input.note ?? null]);
     if (result.rowCount !== 1) throw AppError.conflict("Only DRAFT documents can be updated");
     await client.query("DELETE FROM stock_receipt_details WHERE receipt_id = $1", [id]);
     await insertDetails(id, input.items, client);
     return (await findByIdInternal(id, client))!;
-  });
 }
 export async function findAll(filters: DocumentFilters): Promise<Receipt[]> {
   const where: string[] = []; const params: unknown[] = [];
@@ -117,6 +120,9 @@ export async function findAll(filters: DocumentFilters): Promise<Receipt[]> {
 function createTransaction(client: PoolClient): ReceiptTransaction {
   return {
     findByIdForUpdate: (id) => findByIdInternal(id, client, true),
+    findSupplierById: (id) => findSupplierById(id, client),
+    findProductsByIds: (ids) => findProductsByIds(ids, client),
+    replaceDraft: (id, input) => replaceDraft(id, input, client),
     async increaseStock(productId, quantity) {
       await client.query("UPDATE products SET quantity_in_stock = quantity_in_stock + $2 WHERE id = $1", [productId, quantity]);
     },
@@ -133,4 +139,4 @@ function createTransaction(client: PoolClient): ReceiptTransaction {
 export function transaction<T>(work: (tx: ReceiptTransaction) => Promise<T>): Promise<T> {
   return withTransaction((client) => work(createTransaction(client)));
 }
-export const receiptRepository: ReceiptRepository = { findSupplierById, findProductsByIds, createDraft, findById, replaceDraft, findAll, transaction };
+export const receiptRepository: ReceiptRepository = { findSupplierById, findProductsByIds, createDraft, findById, findAll, transaction };

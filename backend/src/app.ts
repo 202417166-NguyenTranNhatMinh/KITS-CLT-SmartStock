@@ -6,6 +6,7 @@ import YAML from 'yamljs';
 import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler';
 import { sendSuccess } from './common/response';
+import receiptParseRoutes from './routes/receiptParseRoutes';
 import receiptRoutes from './routes/receiptRoutes';
 import issueRoutes from './routes/issueRoutes';
 import categoryRoutes from './routes/categoryRoutes';
@@ -37,6 +38,7 @@ app.get('/api/health', (_req, res) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/receipts', receiptParseRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/categories', categoryRoutes);
