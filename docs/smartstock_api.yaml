@@ -973,6 +973,38 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/reports/stock-summary/export:
+    get:
+      tags: [Inventory]
+      summary: Xuất báo cáo biến động tồn kho ra file CSV (ADMIN)
+      description: Trả về file `text/csv; charset=utf-8` có UTF-8 BOM để mở tiếng Việt chuẩn trên Excel.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: File CSV báo cáo biến động tồn kho
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 # ═════════════════════════ COMPONENTS ═════════════════════════
 components:
   securitySchemes:
