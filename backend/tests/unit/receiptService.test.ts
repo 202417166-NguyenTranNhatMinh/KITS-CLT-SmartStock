@@ -33,11 +33,13 @@ function createService(receipt: Receipt, onIncrease: (productId: number) => void
     async findProductsByIds() { return []; },
     async createDraft() { return receipt; },
     async findById() { return receipt; },
-    async replaceDraft() { return receipt; },
     async findAll() { return []; },
     async transaction(work) {
       return work({
         async findByIdForUpdate() { return receipt; },
+        async findSupplierById() { return { id: 1, name: "Supplier" }; },
+        async findProductsByIds() { return [{ id: 7, name: "Milk", isActive: true }]; },
+        async replaceDraft() { return receipt; },
         async increaseStock(productId) { onIncrease(productId); },
         async finalize() { return receipt; },
       });
@@ -77,4 +79,32 @@ test("confirms receipts by updating products in ascending ID order", async () =>
 
   assert.deepEqual(updatedIds, [3, 9]);
   assert.deepEqual(receipt.items.map((item) => item.productId), [9, 3]);
+});
+
+test("locks receipt before checking update data and replacing details", async () => {
+  const receipt = createReceipt("DRAFT");
+  const events: string[] = [];
+  const repository: ReceiptRepository = {
+    async findSupplierById() { throw new Error("Expected transaction client"); },
+    async findProductsByIds() { throw new Error("Expected transaction client"); },
+    async createDraft() { return receipt; },
+    async findById() { throw new Error("Expected locked read"); },
+    async findAll() { return []; },
+    async transaction(work) {
+      events.push("begin");
+      return work({
+        async findByIdForUpdate() { events.push("lock"); return receipt; },
+        async findSupplierById() { events.push("supplier"); return { id: 1, name: "Supplier" }; },
+        async findProductsByIds() { events.push("products"); return [{ id: 7, name: "Milk", isActive: true }]; },
+        async replaceDraft() { events.push("replace"); return receipt; },
+        async increaseStock() {},
+        async finalize() { return receipt; },
+      });
+    },
+  };
+  const numbers = new DocumentNumberService({ async reserveNextSequence() { return 1; } });
+  await new ReceiptService(repository, numbers).update(1, {
+    supplierId: 1, items: [{ productId: 7, quantity: 2, unitPrice: 50 }],
+  }, staff);
+  assert.deepEqual(events, ["begin", "lock", "supplier", "products", "replace"]);
 });
