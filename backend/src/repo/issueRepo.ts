@@ -11,6 +11,8 @@ export type StockProduct = { id: number; name: string; isActive: boolean; quanti
 export type IssueCreateInput = IssueRequest & { code: string; createdBy: number; createdAt: Date };
 export interface IssueTransaction {
   findByIdForUpdate(id: number): Promise<Issue | null>;
+  findProductsByIds(ids: number[]): Promise<Pick<StockProduct, "id" | "name" | "isActive">[]>;
+  replaceDraft(id: number, input: IssueRequest): Promise<Issue>;
   lockProductsByIds(ids: number[]): Promise<StockProduct[]>;
   decreaseStock(productId: number, quantity: number): Promise<void>;
   finalize(id: number, status: "CONFIRMED" | "CANCELLED", finalizedBy: number, finalizedAt: Date): Promise<Issue>;
@@ -20,7 +22,6 @@ export interface IssueRepository {
   findProductsByIds(ids: number[]): Promise<Pick<StockProduct, "id" | "name" | "isActive">[]>;
   createDraft(input: IssueCreateInput): Promise<Issue>;
   findById(id: number): Promise<Issue | null>;
-  replaceDraft(id: number, input: IssueRequest): Promise<Issue>;
   findAll(filters: DocumentFilters): Promise<Issue[]>;
   transaction<T>(work: (tx: IssueTransaction) => Promise<T>): Promise<T>;
 }
@@ -66,8 +67,8 @@ async function insertDetails(issueId: number, items: IssueRequest["items"], clie
   }
 }
 
-export async function findProductsByIds(ids: number[]): Promise<Pick<StockProduct, "id" | "name" | "isActive">[]> {
-  const products = await productRepo.findByIds(ids);
+export async function findProductsByIds(ids: number[], db: Queryable = pool): Promise<Pick<StockProduct, "id" | "name" | "isActive">[]> {
+  const products = await productRepo.findByIds(ids, db);
   return products.map(({ id, name, isActive }) => ({ id, name, isActive }));
 }
 export async function createDraft(input: IssueCreateInput): Promise<Issue> {
@@ -83,14 +84,12 @@ export async function createDraft(input: IssueCreateInput): Promise<Issue> {
   });
 }
 export function findById(id: number): Promise<Issue | null> { return findByIdInternal(id, pool); }
-export async function replaceDraft(id: number, input: IssueRequest): Promise<Issue> {
-  return withTransaction(async (client) => {
+async function replaceDraft(id: number, input: IssueRequest, client: PoolClient): Promise<Issue> {
     const result = await client.query("UPDATE stock_issues SET reason = $2, note = $3 WHERE id = $1 AND status = 'DRAFT'", [id, input.reason, input.note ?? null]);
     if (result.rowCount !== 1) throw AppError.conflict("Only DRAFT documents can be updated");
     await client.query("DELETE FROM stock_issue_details WHERE issue_id = $1", [id]);
     await insertDetails(id, input.items, client);
     return (await findByIdInternal(id, client))!;
-  });
 }
 export async function findAll(filters: DocumentFilters): Promise<Issue[]> {
   const where: string[] = []; const params: unknown[] = [];
@@ -104,6 +103,8 @@ export async function findAll(filters: DocumentFilters): Promise<Issue[]> {
 function createTransaction(client: PoolClient): IssueTransaction {
   return {
     findByIdForUpdate: (id) => findByIdInternal(id, client, true),
+    findProductsByIds: (ids) => findProductsByIds(ids, client),
+    replaceDraft: (id, input) => replaceDraft(id, input, client),
     async lockProductsByIds(ids) {
       const products = await productRepo.lockByIds(client, ids);
       return products.map(({ id, name, isActive, quantityInStock, minStock }) => ({ id, name, isActive, quantityInStock, minStock }));
@@ -136,4 +137,4 @@ function createTransaction(client: PoolClient): IssueTransaction {
 export function transaction<T>(work: (tx: IssueTransaction) => Promise<T>): Promise<T> {
   return withTransaction((client) => work(createTransaction(client)));
 }
-export const issueRepository: IssueRepository = { findProductsByIds, createDraft, findById, replaceDraft, findAll, transaction };
+export const issueRepository: IssueRepository = { findProductsByIds, createDraft, findById, findAll, transaction };
