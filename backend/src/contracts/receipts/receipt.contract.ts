@@ -49,6 +49,7 @@ export type Receipt = {
   createdByName: string;
   createdAt: string;
   finalizedBy: number | null;
+  finalizedByName: string | null;
   finalizedAt: string | null;
   totalAmount: number;
   items: ReceiptItem[];

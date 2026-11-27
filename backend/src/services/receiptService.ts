@@ -1,7 +1,7 @@
 import type { AuthenticatedUser } from "../contracts/common/enums.contract";
 import type { DocumentFilters } from "../contracts/common/documentFilters.contract";
 import type { Receipt, ReceiptRequest } from "../contracts/receipts/receipt.contract";
-import type { ReceiptRepository } from "../repo/receiptRepo";
+import type { ReceiptRepository, ReceiptTransaction } from "../repo/receiptRepo";
 import { AppError } from "../common/errors";
 import { DocumentNumberService } from "./documentNumberService";
 
@@ -28,10 +28,13 @@ export class ReceiptService {
   }
 
   async update(id: number, input: ReceiptRequest, actor: AuthenticatedUser): Promise<Receipt> {
-    const receipt = await this.requireReceipt(id);
-    this.assertDraftAndOwner(receipt, actor, "updated");
-    await this.ensureSupplierAndProducts(input);
-    return this.receiptRepository.replaceDraft(id, input);
+    return this.receiptRepository.transaction(async (tx) => {
+      const receipt = await tx.findByIdForUpdate(id);
+      if (!receipt) throw notFound("Receipt", id);
+      this.assertDraftAndOwner(receipt, actor, "updated");
+      await this.ensureSupplierAndProducts(input, tx);
+      return tx.replaceDraft(id, input);
+    });
   }
 
   async confirm(id: number, actor: AuthenticatedUser): Promise<Receipt> {
@@ -40,7 +43,9 @@ export class ReceiptService {
       if (!receipt) throw notFound("Receipt", id);
       this.assertDraftAndOwner(receipt, actor, "confirmed");
 
-      for (const item of receipt.items) {
+      // Acquire product row locks in the same order for concurrent receipts.
+      const sortedItems = [...receipt.items].sort((a, b) => a.productId - b.productId);
+      for (const item of sortedItems) {
         await tx.increaseStock(item.productId, item.quantity);
       }
 
@@ -63,13 +68,10 @@ export class ReceiptService {
     return receipt;
   }
 
-  private async ensureSupplierAndProducts(input: ReceiptRequest): Promise<void> {
-    const [supplier, products] = await Promise.all([
-      this.receiptRepository.findSupplierById(input.supplierId),
-      this.receiptRepository.findProductsByIds(input.items.map((item) => item.productId)),
-    ]);
-
+  private async ensureSupplierAndProducts(input: ReceiptRequest, reader: Pick<ReceiptRepository | ReceiptTransaction, "findSupplierById" | "findProductsByIds"> = this.receiptRepository): Promise<void> {
+    const supplier = await reader.findSupplierById(input.supplierId);
     if (!supplier) throw notFound("Supplier", input.supplierId);
+    const products = await reader.findProductsByIds(input.items.map((item) => item.productId));
     assertRequestedProductsAreActive(input.items.map((item) => item.productId), products);
   }
 
